@@ -2,6 +2,9 @@ export type SpecimenState = 'received' | 'aliquoted' | 'stored' | 'released' | '
 export type TransferState = 'prepared' | 'accepted' | 'rejected' | 'cancelled'
 export type ReviewDecision = 'approved' | 'hold' | 'rejected'
 export type TemperatureZone = 'minus20' | 'minus80' | 'liquid_nitrogen'
+export type TemperatureExceptionState = 'open' | 'closed'
+export type TemperatureExceptionAction = 'onsite' | 'relocation'
+export type TemperatureExceptionOutcome = 'recovered' | 'discarded'
 export type Role = 'admin' | 'receiver' | 'custodian' | 'reviewer' | 'auditor'
 
 export interface BaseEntity {
@@ -40,6 +43,39 @@ export interface Specimen extends BaseEntity {
   notes?: string
   transfers?: CustodyTransfer[]
   protocolReviews?: ProtocolReview[]
+  temperatureItems?: TemperatureExceptionItem[]
+}
+
+export interface TemperatureExceptionItem extends BaseEntity {
+  exceptionId: number
+  exception?: TemperatureException
+  specimenId: number
+  specimen?: Specimen
+  targetContainerId?: number
+  targetContainer?: StorageContainer
+  targetPosition?: string
+  moved: boolean
+  sourcePosition?: string
+  sourceTemperatureZone?: TemperatureZone
+  notes?: string
+}
+
+export interface TemperatureException extends BaseEntity {
+  exceptionNo: string
+  containerId: number
+  container?: StorageContainer
+  startTemperatureC: number
+  alarmReason: string
+  handlerName: string
+  action: TemperatureExceptionAction
+  state: TemperatureExceptionState
+  endTemperatureC?: number
+  outcome?: TemperatureExceptionOutcome
+  conclusionNotes?: string
+  closedByName?: string
+  startedAt: string
+  closedAt?: string
+  items?: TemperatureExceptionItem[]
 }
 
 export interface CustodyTransfer extends BaseEntity {

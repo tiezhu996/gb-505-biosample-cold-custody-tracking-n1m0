@@ -9,7 +9,7 @@
 3. 协议复核员核验知情同意、使用范围、保留期限和可选的 MinIO 协议文件对象。通过复核会放行已冻存样本，暂缓或拒绝必须填写说明。
 4. 所有关键写操作记录请求 ID、操作者、前后状态、前后位置和保管人，并使用 SHA-256 前向哈希形成只追加审计链。
 
-首次启动会幂等创建 3 个冻存容器、4 份样本、2 条交接记录和 1 条协议复核记录，便于直接验证完整流程。
+首次启动会幂等创建 3 个冻存容器、4 份样本、2 条交接记录、1 条协议复核记录和 1 条已结案的温度异常处置单，便于直接验证完整流程。
 
 ## 技术结构
 
@@ -57,7 +57,7 @@ curl http://localhost:19505/healthz
 | --- | --- | --- | --- |
 | `admin` | `admin123` | 样本库管理员 | 全部权限 |
 | `receiver` | `receive123` | 样本接收员 | 接收/更新/变更样本、发起交接 |
-| `custodian` | `custody123` | 冻存保管员 | 容器、样本状态、发起和处理交接 |
+| `custodian` | `custody123` | 冻存保管员 | 容器、样本状态、发起和处理交接、温度异常处置 |
 | `reviewer` | `review123` | 协议复核员 | 协议复核、读取审计 |
 | `auditor` | `audit123` | 链路审计员 | 只读审计 |
 
@@ -92,6 +92,9 @@ docker compose down -v
 | `GET /api/custody-transfers[/:id]` | 查询交接 | 已登录 |
 | `POST /api/custody-transfers` | 发起交接 | `transfer:prepare` |
 | `POST /api/custody-transfers/:id/resolve` | 接收、拒绝或取消交接 | `transfer:resolve` |
+| `GET /api/temperature-exceptions[/:id]` | 查询温度异常处置单 | 已登录 |
+| `POST /api/temperature-exceptions` | 登记报警处置单（可选整单转柜） | `temperature:handle` |
+| `POST /api/temperature-exceptions/:id/close` | 确认恢复并补录结束温度、结论 | `temperature:handle` |
 | `GET /api/protocol-reviews[/:id]` | 查询协议复核 | 已登录 |
 | `POST /api/protocol-reviews` | 提交协议复核 | `protocol:review` |
 | `GET /api/audit-logs` | 查询只追加审计事件 | `audit:read` |
@@ -110,6 +113,16 @@ curl -s http://localhost:19505/api/storage-containers \
 ```
 
 协议复核的 `documentObjectKey` 可留空；传入时，后端会到 `MINIO_BUCKET` 指定的 bucket 中确认对象真实存在。
+
+## 温度异常处置
+
+冻存柜报警不再依赖群消息，保管员须在「温度异常处置」页登记处置单：
+
+1. 登记处置单号、报警容器、起始实测温度（必须偏离容器温区）、报警原因和处置人；容器随即置为 `alarm`。
+2. 处置方式二选一：`onsite`（现场观察/抢修，样本留柜）或 `relocation`（转柜）。转柜必须逐支指定每一支样本的目标容器与格位；后端在同一事务内行锁校验同温区、容器可用、容量充足、格位未占用且本单不重复，任一不满足**整单回滚不生效**，不会出现部分转柜。
+3. 处置单未结案期间，容器下样本（含已转到目标柜的样本）**不能发起或受理交接，协议复核不能批准放行**；前端按钮禁用并提示，后端在事务内做最终并发校验。容器也不能被手动改状态、改温区或停用，恢复只能通过处置单结案完成。
+4. 确认恢复后补录结束温度（`recovered` 时必须回到温区内）、结论（温度恢复 / 设备停用待修）和结案人，容器恢复为 `available` 或转 `maintenance`，联锁解除。
+5. 异常时段长期保留：样本页与样本详情、`SampleDrawer` 中均可查看每支样本经历的处置单、起停温度、转柜格位和结论；处置单全程写入只追加审计链。
 
 ## 本地开发与校验
 
@@ -157,12 +170,19 @@ docker compose config --quiet
 - 前端：`src/types/domain.ts`、`src/api/index.ts`、`src/stores/transferStore.ts`、`src/components/common/CustodyBadge.tsx`、`src/components/common/CustodyTimeline.tsx`、`src/pages/TransfersPage.tsx`
 - 测试：`internal/constants/specimen_state_test.go`、`internal/model/quality_rules_test.go`
 
+`TemperatureExceptionState` 固定为 `open`、`closed`；`TemperatureExceptionAction` 固定为 `onsite`、`relocation`；`TemperatureExceptionOutcome` 固定为 `recovered`、`discarded`。
+
+- 后端：`internal/constants/temperature_exception.go`、`internal/model/temperature_exception.go`、`internal/model/specimen.go`、`internal/dto/temperature_exception.go`、`internal/repository/temperature_exception_repository.go`、`internal/repository/transfer_repository.go`、`internal/repository/protocol_repository.go`、`internal/repository/specimen_repository.go`、`internal/service/temperature_exception_service.go`、`internal/service/transfer_service.go`、`internal/service/protocol_service.go`、`internal/service/storage_service.go`、`internal/handler/temperature_exception_handler.go`、`internal/router/router.go`、`internal/util/database.go`
+- 前端：`src/types/domain.ts`、`src/api/index.ts`、`src/stores/temperatureExceptionStore.ts`、`src/components/common/ExceptionTimeline.tsx`、`src/components/common/StatusBadge.tsx`、`src/components/common/SampleDrawer.tsx`、`src/pages/TemperatureExceptionsPage.tsx`、`src/pages/SpecimensPage.tsx`、`src/pages/SpecimenDetailPage.tsx`、`src/pages/TransfersPage.tsx`、`src/pages/ProtocolsPage.tsx`、`src/pages/StoragePage.tsx`
+- 测试：`internal/model/temperature_exception_test.go`
+
 修改枚举时必须同步更新上述位置、数据库兼容策略、测试和 README。
 
 ## 安全与一致性
 
 - JWT 使用 HS256，并在后端路由执行 RBAC；前端导航、路由守卫和操作按钮同步权限，但后端仍是最终权限边界。
 - 交接受理使用事务和行锁，同时校验来源保管人、来源位置、目标容器容量、格位占用和温区。
+- 温度异常处置单在单事务内锁定源柜与目标柜：转柜逐支校验温区、容量和格位，任一失败整单回滚；未结案期间交接与协议放行双重阻断，容器状态只能通过结案恢复。
 - 审计模型拒绝更新和删除，记录前后位置与责任人，并可验证整条 SHA-256 哈希链。
 - 请求日志不记录认证头或请求正文；全局错误处理中间件不会向客户端泄露内部错误。
 - Redis 提供全局限流；MinIO 承载并校验协议附件对象；所有依赖都由 Compose healthcheck 管理启动顺序。

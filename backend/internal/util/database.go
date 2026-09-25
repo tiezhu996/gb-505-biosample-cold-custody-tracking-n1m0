@@ -87,6 +87,8 @@ func Migrate(db *gorm.DB) error {
 		&model.Specimen{},
 		&model.CustodyTransfer{},
 		&model.ProtocolReview{},
+		&model.TemperatureException{},
+		&model.TemperatureExceptionItem{},
 		&model.AuditLog{},
 	); err != nil {
 		return err
@@ -304,6 +306,49 @@ func SeedDemoData(ctx context.Context, db *gorm.DB) error {
 		}
 		if err := tx.Create(&reviews).Error; err != nil {
 			return fmt.Errorf("seed protocol reviews: %w", err)
+		}
+
+		exceptionStart := now.Add(-48 * time.Hour)
+		exceptionEnd := now.Add(-46 * time.Hour)
+		alarmTemperature := -58.6
+		recoveredTemperature := -78.9
+		historicalException := model.TemperatureException{
+			ExceptionNo:       "TE-20260820-002",
+			ContainerID:       containers[1].ID,
+			StartTemperatureC: alarmTemperature,
+			AlarmReason:       "柜门密封老化导致短时间温度回升，已现场复位并联系维保更换密封条",
+			HandlerName:       "冻存保管员",
+			Action:            constants.TemperatureActionOnsite,
+			State:             constants.TemperatureExceptionClosed,
+			EndTemperatureC:   &recoveredTemperature,
+			Outcome:           constants.TemperatureOutcomeRecovered,
+			ConclusionNotes:   "两小时内温区恢复至 -80°C 区间，样本外观与温度记录正常，继续追踪 24 小时无复发",
+			ClosedByName:      "冻存保管员",
+			StartedAt:         exceptionStart,
+			ClosedAt:          &exceptionEnd,
+		}
+		if err := tx.Create(&historicalException).Error; err != nil {
+			return fmt.Errorf("seed temperature exception: %w", err)
+		}
+		exceptionItems := []model.TemperatureExceptionItem{
+			{
+				ExceptionID:           historicalException.ID,
+				SpecimenID:            specimens[0].ID,
+				Moved:                 false,
+				SourcePosition:        specimens[0].Position,
+				SourceTemperatureZone: containers[1].TemperatureZone,
+				Notes:                 "现场观察，温度回升未超过 30 分钟",
+			},
+			{
+				ExceptionID:           historicalException.ID,
+				SpecimenID:            specimens[1].ID,
+				Moved:                 false,
+				SourcePosition:        specimens[1].Position,
+				SourceTemperatureZone: containers[1].TemperatureZone,
+			},
+		}
+		if err := tx.Create(&exceptionItems).Error; err != nil {
+			return fmt.Errorf("seed temperature exception items: %w", err)
 		}
 		return nil
 	})

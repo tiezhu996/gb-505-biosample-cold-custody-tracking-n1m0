@@ -25,13 +25,15 @@ func Build(db *gorm.DB, redisClient *redis.Client, objectStore *minio.Client, cf
 	specimenRepo := repository.NewSpecimenRepository(db)
 	transferRepo := repository.NewTransferRepository(db)
 	protocolRepo := repository.NewProtocolRepository(db)
+	exceptionRepo := repository.NewTemperatureExceptionRepository(db)
 
 	auditService := service.NewAuditService(auditRepo)
 	authService := service.NewAuthService(userRepo, cfg.JWTSecret, cfg.TokenTTL)
-	storageService := service.NewStorageService(storageRepo, auditService)
+	storageService := service.NewStorageService(storageRepo, exceptionRepo, auditService)
 	specimenService := service.NewSpecimenService(specimenRepo, auditService)
-	transferService := service.NewTransferService(transferRepo, specimenRepo, auditService)
-	protocolService := service.NewProtocolService(protocolRepo, specimenRepo, transferRepo, auditService, objectStore, cfg.MinIOBucket)
+	transferService := service.NewTransferService(transferRepo, specimenRepo, exceptionRepo, auditService)
+	protocolService := service.NewProtocolService(protocolRepo, specimenRepo, transferRepo, exceptionRepo, auditService, objectStore, cfg.MinIOBucket)
+	exceptionService := service.NewTemperatureExceptionService(exceptionRepo, storageRepo, auditService)
 
 	if err := authService.Seed(context.Background()); err != nil {
 		return nil, err
@@ -43,6 +45,7 @@ func Build(db *gorm.DB, redisClient *redis.Client, objectStore *minio.Client, cf
 	transferHandler := handler.NewTransferHandler(transferService)
 	protocolHandler := handler.NewProtocolHandler(protocolService)
 	auditHandler := handler.NewAuditHandler(auditService)
+	exceptionHandler := handler.NewTemperatureExceptionHandler(exceptionService)
 
 	engine := gin.New()
 	engine.Use(middleware.RequestContext())
@@ -78,6 +81,12 @@ func Build(db *gorm.DB, redisClient *redis.Client, objectStore *minio.Client, cf
 	secured.GET("/protocol-reviews", protocolHandler.List)
 	secured.GET("/protocol-reviews/:id", protocolHandler.Get)
 	secured.POST("/protocol-reviews", middleware.RequirePermission("protocol:review"), protocolHandler.Review)
+
+	secured.GET("/temperature-exceptions", exceptionHandler.List)
+	secured.GET("/temperature-exceptions/:id", exceptionHandler.Get)
+	secured.POST("/temperature-exceptions", middleware.RequirePermission("temperature:handle"), exceptionHandler.Open)
+	secured.POST("/temperature-exceptions/:id/close", middleware.RequirePermission("temperature:handle"), exceptionHandler.Close)
+
 	secured.GET("/audit-logs", middleware.RequirePermission("audit:read"), auditHandler.List)
 
 	engine.NoRoute(func(c *gin.Context) {

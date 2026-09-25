@@ -8,6 +8,7 @@ import { TransfersPage } from '../pages/TransfersPage'
 import { StoragePage } from '../pages/StoragePage'
 import { LoginPage } from '../pages/LoginPage'
 import { ProtocolsPage } from '../pages/ProtocolsPage'
+import { TemperatureExceptionsPage } from '../pages/TemperatureExceptionsPage'
 
 function ProtectedRoute() {
   const { user } = useAuth()
@@ -31,6 +32,7 @@ export const router = createBrowserRouter([
         { path: '/specimens', element: <SpecimensPage /> },
         { path: '/specimens/:id', element: <SpecimenDetailPage /> },
         { path: '/storage', element: <StoragePage /> },
+        { path: '/temperature-exceptions', element: <TemperatureExceptionsPage /> },
         { path: '/transfers', element: <TransfersPage /> },
         { path: '/protocols', element: <ProtocolsPage /> },
         {

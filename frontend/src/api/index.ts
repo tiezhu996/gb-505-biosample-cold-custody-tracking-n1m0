@@ -1,7 +1,9 @@
 import { apiClient, unwrap } from './client'
 import type {
   AuditLog, CustodyTransfer, PageResult, ProtocolReview, ReviewDecision,
-  Specimen, SpecimenState, StorageContainer, TransferState, User,
+  Specimen, SpecimenState, StorageContainer, TemperatureException,
+  TemperatureExceptionAction, TemperatureExceptionOutcome, TemperatureExceptionState,
+  TransferState, User,
 } from '../types/domain'
 
 export interface PageParams { page?: number; pageSize?: number; search?: string }
@@ -62,4 +64,19 @@ export const protocolAPI = {
 export const auditAPI = {
   list: (params: PageParams & { entityType?: string; actorId?: number } = {}) =>
     unwrap<PageResult<AuditLog>>(apiClient.get('/audit-logs', { params })),
+}
+
+export const temperatureExceptionAPI = {
+  list: (params: PageParams & { state?: TemperatureExceptionState; containerId?: number; specimenId?: number } = {}) =>
+    unwrap<PageResult<TemperatureException>>(apiClient.get('/temperature-exceptions', { params })),
+  get: (id: number) => unwrap<TemperatureException>(apiClient.get(`/temperature-exceptions/${id}`)),
+  open: (payload: {
+    exceptionNo: string; containerId: number; startTemperatureC: number; alarmReason: string;
+    handlerName?: string; action: TemperatureExceptionAction;
+    items: { specimenId: number; targetContainerId?: number; targetPosition?: string; notes?: string }[];
+  }) => unwrap<TemperatureException>(apiClient.post('/temperature-exceptions', payload)),
+  close: (id: number, payload: {
+    endTemperatureC: number; outcome: TemperatureExceptionOutcome;
+    conclusionNotes: string; handlerName?: string;
+  }) => unwrap<TemperatureException>(apiClient.post(`/temperature-exceptions/${id}/close`, payload)),
 }

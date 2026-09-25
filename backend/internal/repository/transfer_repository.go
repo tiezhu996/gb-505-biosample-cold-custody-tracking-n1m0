@@ -73,7 +73,9 @@ func (r *transferRepository) List(ctx context.Context, filter TransferFilter) ([
 		return nil, 0, err
 	}
 	items := make([]model.CustodyTransfer, 0)
-	err := db.Preload("Specimen").Preload("Specimen.StorageContainer").Preload("ToContainer").
+	err := db.Preload("Specimen").Preload("Specimen.StorageContainer").
+		Preload("Specimen.TemperatureItems").Preload("Specimen.TemperatureItems.Exception").
+		Preload("ToContainer").
 		Order("prepared_at DESC, id DESC").Offset((query.Page - 1) * query.PageSize).Limit(query.PageSize).Find(&items).Error
 	return items, total, err
 }
@@ -119,6 +121,17 @@ func (r *transferRepository) Resolve(ctx context.Context, transferID uint, resol
 		if specimen.CurrentCustodian != transfer.FromCustodian || specimen.LocationLabel() != transfer.FromLocation {
 			return ErrSpecimenCustodyChanged
 		}
+		// 拒绝或取消只是清理待处理交接、不移动样本，异常期间仍允许；
+		// 只有接收（实际交接入柜）受温度异常联锁约束。
+		if resolution.State == constants.TransferStateAccepted {
+			openExceptions, exceptionErr := CountOpenForSpecimenTx(tx, specimen.ID)
+			if exceptionErr != nil {
+				return exceptionErr
+			}
+			if openExceptions > 0 {
+				return ErrSpecimenUnderException
+			}
+		}
 
 		transfer.State = resolution.State
 		transfer.ToContainerID = resolution.ToContainerID
@@ -140,6 +153,13 @@ func (r *transferRepository) Resolve(ctx context.Context, transferID uint, resol
 			}
 			if !target.CanReceive() && (specimen.StorageContainerID == nil || *specimen.StorageContainerID != target.ID) {
 				return ErrTargetContainerFull
+			}
+			targetOpenExceptions, exceptionErr := CountOpenForContainerTx(tx, target.ID)
+			if exceptionErr != nil {
+				return exceptionErr
+			}
+			if targetOpenExceptions > 0 && (specimen.StorageContainerID == nil || *specimen.StorageContainerID != target.ID) {
+				return ErrTargetUnderException
 			}
 			if transfer.TemperatureC != nil && !target.AcceptsTemperature(*transfer.TemperatureC) {
 				return ErrTemperatureExcursion

@@ -21,12 +21,13 @@ type StorageService interface {
 }
 
 type storageService struct {
-	repo  repository.StorageRepository
-	audit AuditService
+	repo          repository.StorageRepository
+	exceptionRepo repository.TemperatureExceptionRepository
+	audit         AuditService
 }
 
-func NewStorageService(repo repository.StorageRepository, audit AuditService) StorageService {
-	return &storageService{repo: repo, audit: audit}
+func NewStorageService(repo repository.StorageRepository, exceptionRepo repository.TemperatureExceptionRepository, audit AuditService) StorageService {
+	return &storageService{repo: repo, exceptionRepo: exceptionRepo, audit: audit}
 }
 
 func (s *storageService) List(ctx context.Context, filter repository.StorageFilter) (dto.PageResult[model.StorageContainer], error) {
@@ -81,6 +82,10 @@ func (s *storageService) Update(ctx context.Context, actor Actor, id uint, input
 		return nil, err
 	}
 	before := *item
+	openExceptions, err := s.exceptionRepo.CountOpenForContainer(ctx, id)
+	if err != nil {
+		return nil, err
+	}
 	if input.Name != nil {
 		item.Name = *input.Name
 	}
@@ -88,6 +93,9 @@ func (s *storageService) Update(ctx context.Context, actor Actor, id uint, input
 		item.ContainerType = *input.ContainerType
 	}
 	if input.TemperatureZone != nil {
+		if openExceptions > 0 && *input.TemperatureZone != item.TemperatureZone {
+			return nil, util.Conflict("容器存在未结案温度异常处置单，不能变更温区")
+		}
 		if item.Occupied > 0 && *input.TemperatureZone != item.TemperatureZone {
 			return nil, util.Conflict("容器内仍有样本，不能变更温区")
 		}
@@ -103,10 +111,16 @@ func (s *storageService) Update(ctx context.Context, actor Actor, id uint, input
 		item.Capacity = *input.Capacity
 	}
 	if input.Status != nil {
+		if *input.Status != "alarm" && openExceptions > 0 {
+			return nil, util.Conflict("容器存在未结案温度异常处置单，恢复或其他状态变更必须通过处置单结案完成")
+		}
 		item.Status = *input.Status
 	}
 	if input.Active != nil {
 		if !*input.Active {
+			if openExceptions > 0 {
+				return nil, util.Conflict("容器存在未结案温度异常处置单，不能停用")
+			}
 			count, countErr := s.repo.CountStoredSpecimens(ctx, id)
 			if countErr != nil {
 				return nil, countErr

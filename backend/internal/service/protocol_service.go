@@ -22,16 +22,17 @@ type ProtocolService interface {
 }
 
 type protocolService struct {
-	repo         repository.ProtocolRepository
-	specimenRepo repository.SpecimenRepository
-	transferRepo repository.TransferRepository
-	audit        AuditService
-	objectStore  *minio.Client
-	bucket       string
+	repo          repository.ProtocolRepository
+	specimenRepo  repository.SpecimenRepository
+	transferRepo  repository.TransferRepository
+	exceptionRepo repository.TemperatureExceptionRepository
+	audit         AuditService
+	objectStore   *minio.Client
+	bucket        string
 }
 
-func NewProtocolService(repo repository.ProtocolRepository, specimenRepo repository.SpecimenRepository, transferRepo repository.TransferRepository, audit AuditService, objectStore *minio.Client, bucket string) ProtocolService {
-	return &protocolService{repo: repo, specimenRepo: specimenRepo, transferRepo: transferRepo, audit: audit, objectStore: objectStore, bucket: bucket}
+func NewProtocolService(repo repository.ProtocolRepository, specimenRepo repository.SpecimenRepository, transferRepo repository.TransferRepository, exceptionRepo repository.TemperatureExceptionRepository, audit AuditService, objectStore *minio.Client, bucket string) ProtocolService {
+	return &protocolService{repo: repo, specimenRepo: specimenRepo, transferRepo: transferRepo, exceptionRepo: exceptionRepo, audit: audit, objectStore: objectStore, bucket: bucket}
 }
 
 func (s *protocolService) List(ctx context.Context, filter repository.ProtocolFilter) (dto.PageResult[model.ProtocolReview], error) {
@@ -66,6 +67,15 @@ func (s *protocolService) Review(ctx context.Context, actor Actor, input dto.Cre
 	if input.Decision == constants.DecisionApproved && specimen.State != constants.SpecimenStateStored {
 		return nil, util.Conflict("只有已冻存样本可以批准放行")
 	}
+	if input.Decision == constants.DecisionApproved {
+		openExceptions, exceptionErr := s.exceptionRepo.CountOpenForSpecimen(ctx, specimen.ID)
+		if exceptionErr != nil {
+			return nil, exceptionErr
+		}
+		if openExceptions > 0 {
+			return nil, util.Conflict("样本处于温度异常处置期间，暂缓协议放行，待处置单结案后再批准")
+		}
+	}
 	documentKey := ""
 	if input.DocumentObjectKey != nil {
 		documentKey = strings.TrimSpace(*input.DocumentObjectKey)
@@ -95,6 +105,9 @@ func (s *protocolService) Review(ctx context.Context, actor Actor, input dto.Cre
 	created, afterSpecimen, beforeSpecimen, err := s.repo.Create(ctx, review)
 	if errors.Is(err, repository.ErrSpecimenNotReviewable) {
 		return nil, util.Conflict("样本状态或协议已变化，无法完成复核")
+	}
+	if errors.Is(err, repository.ErrSpecimenUnderException) {
+		return nil, util.Conflict("样本处于温度异常处置期间，暂缓协议放行")
 	}
 	if err != nil {
 		return nil, err

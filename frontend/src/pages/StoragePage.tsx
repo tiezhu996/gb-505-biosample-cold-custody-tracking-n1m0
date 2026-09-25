@@ -1,7 +1,8 @@
-import { PlusOutlined, SearchOutlined } from '@ant-design/icons'
+import { AlertOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons'
 import { Button, Col, Form, Input, InputNumber, Modal, Progress, Row, Select, Space, Statistic, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { storageAPI } from '../api'
 import { EntityTable } from '../components/common/EntityTable'
 import { StatusBadge } from '../components/common/StatusBadge'
@@ -15,6 +16,7 @@ export function StoragePage() {
   const { data, loading, load } = useStorageStore()
   const pagination = usePagination()
   const { can } = useAuth()
+  const navigate = useNavigate()
   const [search, setSearch] = useState('')
   const [zone, setZone] = useState<string>()
   const [open, setOpen] = useState(false)
@@ -36,6 +38,14 @@ export function StoragePage() {
     { title: '运行状态', dataIndex: 'status', render: (value) => <StatusBadge value={value} dot /> },
     { title: '启用', dataIndex: 'active', render: (value) => value ? '启用' : '停用' },
     { title: '最近更新', dataIndex: 'updatedAt', render: formatDateTime },
+    {
+      title: '操作', fixed: 'right',
+      render: (_, row) => can('temperature:handle') && (
+        row.status === 'alarm'
+          ? <Button size="small" type="primary" icon={<AlertOutlined />} onClick={() => navigate('/temperature-exceptions', { state: { containerId: row.id } })}>处置报警</Button>
+          : <Button size="small" icon={<AlertOutlined />} onClick={() => navigate('/temperature-exceptions')}>温度异常单</Button>
+      ),
+    },
   ]
   return (
     <div className="page-stack">

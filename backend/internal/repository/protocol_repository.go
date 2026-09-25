@@ -84,6 +84,13 @@ func (r *protocolRepository) Create(ctx context.Context, review *model.ProtocolR
 			if specimen.State != constants.SpecimenStateStored {
 				return ErrSpecimenNotReviewable
 			}
+			openExceptions, exceptionErr := CountOpenForSpecimenTx(tx, specimen.ID)
+			if exceptionErr != nil {
+				return exceptionErr
+			}
+			if openExceptions > 0 {
+				return ErrSpecimenUnderException
+			}
 			if specimen.StorageContainerID != nil {
 				if err := tx.Model(&model.StorageContainer{}).Where("id = ?", *specimen.StorageContainerID).
 					UpdateColumn("occupied", gorm.Expr("GREATEST(occupied - 1, 0)")).Error; err != nil {

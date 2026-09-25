@@ -23,13 +23,14 @@ type TransferService interface {
 }
 
 type transferService struct {
-	repo         repository.TransferRepository
-	specimenRepo repository.SpecimenRepository
-	audit        AuditService
+	repo          repository.TransferRepository
+	specimenRepo  repository.SpecimenRepository
+	exceptionRepo repository.TemperatureExceptionRepository
+	audit         AuditService
 }
 
-func NewTransferService(repo repository.TransferRepository, specimenRepo repository.SpecimenRepository, audit AuditService) TransferService {
-	return &transferService{repo: repo, specimenRepo: specimenRepo, audit: audit}
+func NewTransferService(repo repository.TransferRepository, specimenRepo repository.SpecimenRepository, exceptionRepo repository.TemperatureExceptionRepository, audit AuditService) TransferService {
+	return &transferService{repo: repo, specimenRepo: specimenRepo, exceptionRepo: exceptionRepo, audit: audit}
 }
 
 func (s *transferService) List(ctx context.Context, filter repository.TransferFilter) (dto.PageResult[model.CustodyTransfer], error) {
@@ -63,6 +64,13 @@ func (s *transferService) Create(ctx context.Context, actor Actor, input dto.Cre
 	}
 	if prepared > 0 {
 		return nil, util.Conflict("该样本已有待处理交接")
+	}
+	openExceptions, err := s.exceptionRepo.CountOpenForSpecimen(ctx, specimen.ID)
+	if err != nil {
+		return nil, err
+	}
+	if openExceptions > 0 {
+		return nil, util.Conflict("样本处于温度异常处置期间，暂缓交接，待处置单结案后再发起")
 	}
 	if strings.TrimSpace(input.FromCustodian) != specimen.CurrentCustodian {
 		return nil, util.Conflict("交出人必须是样本当前保管人")
@@ -174,6 +182,10 @@ func mapTransferError(err error) error {
 		return util.Conflict("目标冻存位置已被占用")
 	case errors.Is(err, repository.ErrTemperatureExcursion):
 		return util.Conflict("交接温度超出目标容器温区")
+	case errors.Is(err, repository.ErrSpecimenUnderException):
+		return util.Conflict("样本处于温度异常处置期间，暂缓交接")
+	case errors.Is(err, repository.ErrTargetUnderException):
+		return util.Conflict("目标容器存在未结案温度异常处置单，不能接收入柜")
 	default:
 		return err
 	}
