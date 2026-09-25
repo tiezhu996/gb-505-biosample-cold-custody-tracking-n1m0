@@ -1,5 +1,5 @@
 import { EyeOutlined, ForkOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons'
-import { Button, Col, Form, Input, InputNumber, Modal, Row, Select, Space, Typography, message } from 'antd'
+import { Button, Col, Form, Input, InputNumber, Modal, Row, Select, Space, Tag, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useEffect, useState } from 'react'
 import { specimenAPI } from '../api'
@@ -58,11 +58,18 @@ export function SpecimensPage() {
     { title: '受试者编码', dataIndex: 'subjectCode' },
     { title: '协议', dataIndex: 'protocolCode' },
     { title: '状态', dataIndex: 'state', render: (value) => <CustodyBadge state={value} /> },
+    { title: '温度异常', render: (_, row) => {
+      const open = (row.incidentItems || []).filter((item) => item.incident?.state === 'open')
+      return open.length ? <Tag color="error">处置中 · {open[0].incident?.incidentNo}</Tag> : (row.incidentItems?.length ? <Tag color="default">历史异常 {row.incidentItems.length}</Tag> : '-')
+    } },
     { title: '冻存位置', render: (_, row) => row.storageContainer ? `${row.storageContainer.code} / ${row.position || '-'}` : '待分配' },
     { title: '当前保管人', dataIndex: 'currentCustodian' },
     { title: '体积/分装', render: (_, row) => `${row.volumeMl} mL / ${row.aliquotCount} 份` },
     { title: '接收时间', dataIndex: 'receivedAt', render: formatDateTime },
-    { title: '操作', fixed: 'right', render: (_, row) => <Space><Button size="small" icon={<EyeOutlined />} onClick={() => void show(row)}>详情</Button>{row.state === 'received' && can('specimen:transition') && <Button size="small" icon={<ForkOutlined />} onClick={() => { setAliquotTarget(row); aliquotForm.setFieldsValue({ aliquotCount: Math.max(row.aliquotCount, 1) }) }}>完成分装</Button>}</Space> },
+    { title: '操作', fixed: 'right', render: (_, row) => {
+      const suspended = (row.incidentItems || []).some((item) => item.incident?.state === 'open')
+      return <Space><Button size="small" icon={<EyeOutlined />} onClick={() => void show(row)}>详情</Button>{row.state === 'received' && can('specimen:transition') && !suspended && <Button size="small" icon={<ForkOutlined />} onClick={() => { setAliquotTarget(row); aliquotForm.setFieldsValue({ aliquotCount: Math.max(row.aliquotCount, 1) }) }}>完成分装</Button>}{suspended && <Button size="small" danger disabled>异常暂缓</Button>}</Space>
+    } },
   ]
   return (
     <div className="page-stack">

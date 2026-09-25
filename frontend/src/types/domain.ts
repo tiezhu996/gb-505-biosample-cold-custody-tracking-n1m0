@@ -1,6 +1,7 @@
 export type SpecimenState = 'received' | 'aliquoted' | 'stored' | 'released' | 'disposed'
 export type TransferState = 'prepared' | 'accepted' | 'rejected' | 'cancelled'
 export type ReviewDecision = 'approved' | 'hold' | 'rejected'
+export type IncidentState = 'open' | 'resolved'
 export type TemperatureZone = 'minus20' | 'minus80' | 'liquid_nitrogen'
 export type Role = 'admin' | 'receiver' | 'custodian' | 'reviewer' | 'auditor'
 
@@ -40,6 +41,7 @@ export interface Specimen extends BaseEntity {
   notes?: string
   transfers?: CustodyTransfer[]
   protocolReviews?: ProtocolReview[]
+  incidentItems?: TemperatureIncidentItem[]
 }
 
 export interface CustodyTransfer extends BaseEntity {
@@ -77,6 +79,38 @@ export interface ProtocolReview extends BaseEntity {
   documentObjectKey?: string
   notes: string
   reviewedAt: string
+}
+
+export interface TemperatureIncidentItem extends BaseEntity {
+  incidentId: number
+  incident?: TemperatureIncident
+  specimenId: number
+  specimen?: Specimen
+  snapshotContainerId?: number
+  snapshotPosition?: string
+  targetContainerId?: number
+  targetContainer?: StorageContainer
+  targetPosition?: string
+  relocatedAt?: string
+  relocatedByName?: string
+}
+
+export interface TemperatureIncident extends BaseEntity {
+  incidentNo: string
+  containerId: number
+  container?: StorageContainer
+  state: IncidentState
+  startTempC: number
+  endTempC?: number
+  alarmReason: string
+  conclusion?: string
+  handlerId: number
+  handlerName: string
+  recoveredById?: number
+  recoveredByName?: string
+  startedAt: string
+  resolvedAt?: string
+  items?: TemperatureIncidentItem[]
 }
 
 export interface AuditLog {

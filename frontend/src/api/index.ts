@@ -1,7 +1,7 @@
 import { apiClient, unwrap } from './client'
 import type {
-  AuditLog, CustodyTransfer, PageResult, ProtocolReview, ReviewDecision,
-  Specimen, SpecimenState, StorageContainer, TransferState, User,
+  AuditLog, CustodyTransfer, IncidentState, PageResult, ProtocolReview, ReviewDecision,
+  Specimen, SpecimenState, StorageContainer, TemperatureIncident, TransferState, User,
 } from '../types/domain'
 
 export interface PageParams { page?: number; pageSize?: number; search?: string }
@@ -57,6 +57,18 @@ export const protocolAPI = {
     specimenId: number; protocolCode: string; decision: ReviewDecision; consentVerified: boolean;
     scopeVerified: boolean; retentionUntil?: string; documentObjectKey?: string; notes: string;
   }) => unwrap<ProtocolReview>(apiClient.post('/protocol-reviews', payload)),
+}
+
+export const incidentAPI = {
+  list: (params: PageParams & { state?: IncidentState; containerId?: number } = {}) =>
+    unwrap<PageResult<TemperatureIncident>>(apiClient.get('/temperature-incidents', { params })),
+  get: (id: number) => unwrap<TemperatureIncident>(apiClient.get(`/temperature-incidents/${id}`)),
+  create: (payload: { containerId: number; startTempC: number; alarmReason: string; startedAt?: string }) =>
+    unwrap<TemperatureIncident>(apiClient.post('/temperature-incidents', payload)),
+  relocate: (id: number, items: { specimenId: number; targetContainerId: number; targetPosition: string }[]) =>
+    unwrap<TemperatureIncident>(apiClient.post(`/temperature-incidents/${id}/relocate`, { items })),
+  resolve: (id: number, payload: { endTempC: number; conclusion: string; resolvedAt?: string }) =>
+    unwrap<TemperatureIncident>(apiClient.post(`/temperature-incidents/${id}/resolve`, payload)),
 }
 
 export const auditAPI = {

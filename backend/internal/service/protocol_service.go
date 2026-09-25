@@ -25,13 +25,14 @@ type protocolService struct {
 	repo         repository.ProtocolRepository
 	specimenRepo repository.SpecimenRepository
 	transferRepo repository.TransferRepository
+	incidentRepo repository.IncidentRepository
 	audit        AuditService
 	objectStore  *minio.Client
 	bucket       string
 }
 
-func NewProtocolService(repo repository.ProtocolRepository, specimenRepo repository.SpecimenRepository, transferRepo repository.TransferRepository, audit AuditService, objectStore *minio.Client, bucket string) ProtocolService {
-	return &protocolService{repo: repo, specimenRepo: specimenRepo, transferRepo: transferRepo, audit: audit, objectStore: objectStore, bucket: bucket}
+func NewProtocolService(repo repository.ProtocolRepository, specimenRepo repository.SpecimenRepository, transferRepo repository.TransferRepository, incidentRepo repository.IncidentRepository, audit AuditService, objectStore *minio.Client, bucket string) ProtocolService {
+	return &protocolService{repo: repo, specimenRepo: specimenRepo, transferRepo: transferRepo, incidentRepo: incidentRepo, audit: audit, objectStore: objectStore, bucket: bucket}
 }
 
 func (s *protocolService) List(ctx context.Context, filter repository.ProtocolFilter) (dto.PageResult[model.ProtocolReview], error) {
@@ -66,6 +67,15 @@ func (s *protocolService) Review(ctx context.Context, actor Actor, input dto.Cre
 	if input.Decision == constants.DecisionApproved && specimen.State != constants.SpecimenStateStored {
 		return nil, util.Conflict("只有已冻存样本可以批准放行")
 	}
+	if input.Decision == constants.DecisionApproved {
+		openIncidents, countErr := s.incidentRepo.CountOpenForSpecimen(ctx, specimen.ID)
+		if countErr != nil {
+			return nil, countErr
+		}
+		if openIncidents > 0 {
+			return nil, util.Conflict("样本处于温度异常处置期间，暂缓协议放行，待处置单结案后再批准")
+		}
+	}
 	documentKey := ""
 	if input.DocumentObjectKey != nil {
 		documentKey = strings.TrimSpace(*input.DocumentObjectKey)
@@ -92,9 +102,12 @@ func (s *protocolService) Review(ctx context.Context, actor Actor, input dto.Cre
 	if err := review.Validate(); err != nil {
 		return nil, util.BadRequest(err.Error())
 	}
-	created, afterSpecimen, beforeSpecimen, err := s.repo.Create(ctx, review)
+	created, afterSpecimen, beforeSpecimen, err := s.repo.Create(ctx, review, s.incidentRepo)
 	if errors.Is(err, repository.ErrSpecimenNotReviewable) {
 		return nil, util.Conflict("样本状态或协议已变化，无法完成复核")
+	}
+	if errors.Is(err, repository.ErrSpecimenIncidentOpen) {
+		return nil, util.Conflict("样本处于温度异常处置期间，暂缓协议放行")
 	}
 	if err != nil {
 		return nil, err

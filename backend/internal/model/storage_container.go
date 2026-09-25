@@ -109,3 +109,24 @@ func (c StorageContainer) TemperatureRange() (float64, float64) {
 		return 1, 0
 	}
 }
+
+// TemperatureZoneRank ranks zones colder to warmer. A sample may only be
+// relocated to a zone at least as cold as its current zone.
+func TemperatureZoneRank(zone string) (int, bool) {
+	switch zone {
+	case "liquid_nitrogen":
+		return 3, true
+	case "minus80":
+		return 2, true
+	case "minus20":
+		return 1, true
+	default:
+		return 0, false
+	}
+}
+
+func CanRelocateZone(fromZone, toZone string) bool {
+	fromRank, fromOK := TemperatureZoneRank(fromZone)
+	toRank, toOK := TemperatureZoneRank(toZone)
+	return fromOK && toOK && toRank >= fromRank
+}

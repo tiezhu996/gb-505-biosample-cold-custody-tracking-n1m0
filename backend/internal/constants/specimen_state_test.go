@@ -47,6 +47,12 @@ func TestRolePermissionsAreLeastPrivilege(t *testing.T) {
 	if !RoleCustodian.Can("transfer:resolve") || RoleCustodian.Can("protocol:review") {
 		t.Fatal("custodian must resolve transfers but not review protocols")
 	}
+	if !RoleCustodian.Can("incident:manage") || RoleReviewer.Can("incident:manage") {
+		t.Fatal("temperature incident orders belong to custodians, not reviewers")
+	}
+	if !IncidentStateOpen.Open() || IncidentStateResolved.Open() {
+		t.Fatal("only the open incident state suspends samples")
+	}
 	if !RoleReviewer.Can("protocol:review") || RoleReviewer.Can("specimen:create") {
 		t.Fatal("reviewer must only receive review and audit grants")
 	}

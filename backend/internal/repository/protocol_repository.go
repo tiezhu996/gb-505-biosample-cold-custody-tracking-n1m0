@@ -25,7 +25,7 @@ type ProtocolRepository interface {
 	List(context.Context, ProtocolFilter) ([]model.ProtocolReview, int64, error)
 	Find(context.Context, uint) (*model.ProtocolReview, error)
 	LatestForSpecimen(context.Context, uint) (*model.ProtocolReview, error)
-	Create(context.Context, *model.ProtocolReview) (*model.ProtocolReview, model.Specimen, model.Specimen, error)
+	Create(context.Context, *model.ProtocolReview, IncidentGuard) (*model.ProtocolReview, model.Specimen, model.Specimen, error)
 }
 
 type protocolRepository struct{ db *gorm.DB }
@@ -52,7 +52,8 @@ func (r *protocolRepository) List(ctx context.Context, filter ProtocolFilter) ([
 		return nil, 0, err
 	}
 	items := make([]model.ProtocolReview, 0)
-	err := db.Preload("Specimen").Order("reviewed_at DESC, id DESC").
+	err := db.Preload("Specimen").Preload("Specimen.IncidentItems").Preload("Specimen.IncidentItems.Incident").
+		Order("reviewed_at DESC, id DESC").
 		Offset((query.Page - 1) * query.PageSize).Limit(query.PageSize).Find(&items).Error
 	return items, total, err
 }
@@ -69,7 +70,7 @@ func (r *protocolRepository) LatestForSpecimen(ctx context.Context, specimenID u
 	return &item, err
 }
 
-func (r *protocolRepository) Create(ctx context.Context, review *model.ProtocolReview) (*model.ProtocolReview, model.Specimen, model.Specimen, error) {
+func (r *protocolRepository) Create(ctx context.Context, review *model.ProtocolReview, incidents IncidentGuard) (*model.ProtocolReview, model.Specimen, model.Specimen, error) {
 	var specimen model.Specimen
 	var before model.Specimen
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -83,6 +84,15 @@ func (r *protocolRepository) Create(ctx context.Context, review *model.ProtocolR
 		if review.Decision == constants.DecisionApproved {
 			if specimen.State != constants.SpecimenStateStored {
 				return ErrSpecimenNotReviewable
+			}
+			if incidents != nil {
+				openIncidents, guardErr := incidents.CountOpenForSpecimenTx(tx, specimen.ID)
+				if guardErr != nil {
+					return guardErr
+				}
+				if openIncidents > 0 {
+					return ErrSpecimenIncidentOpen
+				}
 			}
 			if specimen.StorageContainerID != nil {
 				if err := tx.Model(&model.StorageContainer{}).Where("id = ?", *specimen.StorageContainerID).

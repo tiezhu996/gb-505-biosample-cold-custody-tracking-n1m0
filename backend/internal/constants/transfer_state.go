@@ -60,6 +60,7 @@ var permissionOrder = []string{
 	"specimen:transition",
 	"transfer:prepare",
 	"transfer:resolve",
+	"incident:manage",
 	"protocol:review",
 	"audit:read",
 }
@@ -77,6 +78,7 @@ var roleGrants = map[Role]map[string]struct{}{
 		"specimen:transition": {},
 		"transfer:prepare":    {},
 		"transfer:resolve":    {},
+		"incident:manage":     {},
 	},
 	RoleReviewer: {
 		"protocol:review": {},

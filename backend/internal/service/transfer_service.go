@@ -25,11 +25,12 @@ type TransferService interface {
 type transferService struct {
 	repo         repository.TransferRepository
 	specimenRepo repository.SpecimenRepository
+	incidentRepo repository.IncidentRepository
 	audit        AuditService
 }
 
-func NewTransferService(repo repository.TransferRepository, specimenRepo repository.SpecimenRepository, audit AuditService) TransferService {
-	return &transferService{repo: repo, specimenRepo: specimenRepo, audit: audit}
+func NewTransferService(repo repository.TransferRepository, specimenRepo repository.SpecimenRepository, incidentRepo repository.IncidentRepository, audit AuditService) TransferService {
+	return &transferService{repo: repo, specimenRepo: specimenRepo, incidentRepo: incidentRepo, audit: audit}
 }
 
 func (s *transferService) List(ctx context.Context, filter repository.TransferFilter) (dto.PageResult[model.CustodyTransfer], error) {
@@ -63,6 +64,13 @@ func (s *transferService) Create(ctx context.Context, actor Actor, input dto.Cre
 	}
 	if prepared > 0 {
 		return nil, util.Conflict("该样本已有待处理交接")
+	}
+	openIncidents, err := s.incidentRepo.CountOpenForSpecimen(ctx, specimen.ID)
+	if err != nil {
+		return nil, err
+	}
+	if openIncidents > 0 {
+		return nil, util.Conflict("样本处于温度异常处置期间，暂缓交接，待处置单结案后再发起")
 	}
 	if strings.TrimSpace(input.FromCustodian) != specimen.CurrentCustodian {
 		return nil, util.Conflict("交出人必须是样本当前保管人")
@@ -147,7 +155,7 @@ func (s *transferService) Resolve(ctx context.Context, actor Actor, id uint, inp
 		ResolvedByName: actor.Name,
 		ResolvedAt:     time.Now().UTC(),
 	}
-	resolved, specimen, specimenBefore, err := s.repo.Resolve(ctx, id, resolution)
+	resolved, specimen, specimenBefore, err := s.repo.Resolve(ctx, id, resolution, s.incidentRepo)
 	if err != nil {
 		return nil, mapTransferError(err)
 	}
@@ -174,6 +182,10 @@ func mapTransferError(err error) error {
 		return util.Conflict("目标冻存位置已被占用")
 	case errors.Is(err, repository.ErrTemperatureExcursion):
 		return util.Conflict("交接温度超出目标容器温区")
+	case errors.Is(err, repository.ErrSpecimenIncidentOpen):
+		return util.Conflict("样本处于温度异常处置期间，暂缓交接")
+	case errors.Is(err, repository.ErrContainerIncidentOpen):
+		return util.Conflict("目标容器处于温度异常处置期间，暂缓交接")
 	default:
 		return err
 	}

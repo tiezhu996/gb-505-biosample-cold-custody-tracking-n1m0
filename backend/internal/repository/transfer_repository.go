@@ -21,6 +21,8 @@ var (
 	ErrTargetContainerFull     = errors.New("target storage container is not available or is full")
 	ErrPositionOccupied        = errors.New("target storage position is already occupied")
 	ErrTemperatureExcursion    = errors.New("recorded temperature is outside the target container range")
+	ErrSpecimenIncidentOpen    = errors.New("specimen is suspended by an open temperature incident")
+	ErrContainerIncidentOpen   = errors.New("target container has an open temperature incident")
 )
 
 type TransferFilter struct {
@@ -46,7 +48,14 @@ type TransferRepository interface {
 	FindByNumber(context.Context, string) (*model.CustodyTransfer, error)
 	Create(context.Context, *model.CustodyTransfer) error
 	CountPreparedForSpecimen(context.Context, uint) (int64, error)
-	Resolve(context.Context, uint, TransferResolution) (*model.CustodyTransfer, *model.Specimen, model.Specimen, error)
+	Resolve(context.Context, uint, TransferResolution, IncidentGuard) (*model.CustodyTransfer, *model.Specimen, model.Specimen, error)
+}
+
+// IncidentGuard checks open temperature incidents using the transaction,
+// ensuring the suspension cannot be bypassed by a racing alarm.
+type IncidentGuard interface {
+	CountOpenForSpecimenTx(*gorm.DB, uint) (int64, error)
+	CountOpenForContainerTx(*gorm.DB, uint) (int64, error)
 }
 
 type transferRepository struct{ db *gorm.DB }
@@ -73,14 +82,16 @@ func (r *transferRepository) List(ctx context.Context, filter TransferFilter) ([
 		return nil, 0, err
 	}
 	items := make([]model.CustodyTransfer, 0)
-	err := db.Preload("Specimen").Preload("Specimen.StorageContainer").Preload("ToContainer").
+	err := db.Preload("Specimen").Preload("Specimen.StorageContainer").
+		Preload("Specimen.IncidentItems").Preload("Specimen.IncidentItems.Incident").Preload("ToContainer").
 		Order("prepared_at DESC, id DESC").Offset((query.Page - 1) * query.PageSize).Limit(query.PageSize).Find(&items).Error
 	return items, total, err
 }
 
 func (r *transferRepository) Find(ctx context.Context, id uint) (*model.CustodyTransfer, error) {
 	var item model.CustodyTransfer
-	err := r.db.WithContext(ctx).Preload("Specimen").Preload("Specimen.StorageContainer").Preload("ToContainer").First(&item, id).Error
+	err := r.db.WithContext(ctx).Preload("Specimen").Preload("Specimen.StorageContainer").
+		Preload("Specimen.IncidentItems").Preload("Specimen.IncidentItems.Incident").Preload("ToContainer").First(&item, id).Error
 	return &item, err
 }
 
@@ -101,7 +112,7 @@ func (r *transferRepository) CountPreparedForSpecimen(ctx context.Context, speci
 	return count, err
 }
 
-func (r *transferRepository) Resolve(ctx context.Context, transferID uint, resolution TransferResolution) (*model.CustodyTransfer, *model.Specimen, model.Specimen, error) {
+func (r *transferRepository) Resolve(ctx context.Context, transferID uint, resolution TransferResolution, incidents IncidentGuard) (*model.CustodyTransfer, *model.Specimen, model.Specimen, error) {
 	var transfer model.CustodyTransfer
 	var specimen model.Specimen
 	var before model.Specimen
@@ -118,6 +129,15 @@ func (r *transferRepository) Resolve(ctx context.Context, transferID uint, resol
 		before = specimen
 		if specimen.CurrentCustodian != transfer.FromCustodian || specimen.LocationLabel() != transfer.FromLocation {
 			return ErrSpecimenCustodyChanged
+		}
+		if incidents != nil {
+			openForSpecimen, guardErr := incidents.CountOpenForSpecimenTx(tx, specimen.ID)
+			if guardErr != nil {
+				return guardErr
+			}
+			if openForSpecimen > 0 {
+				return ErrSpecimenIncidentOpen
+			}
 		}
 
 		transfer.State = resolution.State
@@ -137,6 +157,15 @@ func (r *transferRepository) Resolve(ctx context.Context, transferID uint, resol
 			var target model.StorageContainer
 			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&target, *transfer.ToContainerID).Error; err != nil {
 				return err
+			}
+			if incidents != nil {
+				openForContainer, guardErr := incidents.CountOpenForContainerTx(tx, target.ID)
+				if guardErr != nil {
+					return guardErr
+				}
+				if openForContainer > 0 {
+					return ErrContainerIncidentOpen
+				}
 			}
 			if !target.CanReceive() && (specimen.StorageContainerID == nil || *specimen.StorageContainerID != target.ID) {
 				return ErrTargetContainerFull

@@ -1,7 +1,8 @@
-import { PlusOutlined, SearchOutlined } from '@ant-design/icons'
+import { AlertOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons'
 import { Button, Col, Form, Input, InputNumber, Modal, Progress, Row, Select, Space, Statistic, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { storageAPI } from '../api'
 import { EntityTable } from '../components/common/EntityTable'
 import { StatusBadge } from '../components/common/StatusBadge'
@@ -20,6 +21,7 @@ export function StoragePage() {
   const [open, setOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [form] = Form.useForm()
+  const navigate = useNavigate()
   const refresh = () => load({ page: pagination.page, pageSize: pagination.pageSize, search, temperatureZone: zone })
   useEffect(() => { void refresh() }, [pagination.page, pagination.pageSize, zone])
   const create = async () => {
@@ -36,6 +38,12 @@ export function StoragePage() {
     { title: '运行状态', dataIndex: 'status', render: (value) => <StatusBadge value={value} dot /> },
     { title: '启用', dataIndex: 'active', render: (value) => value ? '启用' : '停用' },
     { title: '最近更新', dataIndex: 'updatedAt', render: formatDateTime },
+    { title: '操作', fixed: 'right', render: (_, row) => can('incident:manage') && row.active && (
+      <Button size="small" danger={row.status !== 'alarm'} type={row.status === 'alarm' ? 'primary' : 'default'} icon={<AlertOutlined />}
+        onClick={() => navigate(row.status === 'alarm' ? `/incidents?containerId=${row.id}` : `/incidents?containerId=${row.id}&alarm=1`)}>
+        {row.status === 'alarm' ? '查看处置单' : '登记温度异常'}
+      </Button>
+    ) },
   ]
   return (
     <div className="page-stack">

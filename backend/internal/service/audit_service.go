@@ -110,6 +110,15 @@ func custodyCoordinates(value any) (string, string) {
 		if item != nil {
 			return custodyCoordinates(*item)
 		}
+	case model.TemperatureIncident:
+		if item.Container != nil {
+			return strings.Trim(strings.Join([]string{item.Container.Location, item.Container.Code}, " / "), " / "), item.HandlerName
+		}
+		return "", item.HandlerName
+	case *model.TemperatureIncident:
+		if item != nil {
+			return custodyCoordinates(*item)
+		}
 	}
 	return "", ""
 }

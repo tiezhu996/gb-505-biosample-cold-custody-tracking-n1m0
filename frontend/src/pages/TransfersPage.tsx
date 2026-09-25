@@ -1,5 +1,5 @@
-import { CheckOutlined, CloseOutlined, HistoryOutlined, PlusOutlined, SearchOutlined, StopOutlined } from '@ant-design/icons'
-import { Button, Col, Drawer, Form, Input, InputNumber, Modal, Row, Segmented, Select, Space, Typography, message } from 'antd'
+import { CheckOutlined, CloseOutlined, HistoryOutlined, PlusOutlined, SearchOutlined, StopOutlined, WarningOutlined } from '@ant-design/icons'
+import { Alert, Button, Col, Drawer, Form, Input, InputNumber, Modal, Row, Segmented, Select, Space, Tag, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useEffect, useState } from 'react'
 import { specimenAPI, storageAPI, transferAPI } from '../api'
@@ -29,6 +29,8 @@ export function TransfersPage() {
   const [saving, setSaving] = useState(false)
   const [createForm] = Form.useForm()
   const [resolveForm] = Form.useForm()
+  const createSpecimenId = Form.useWatch('specimenId', createForm)
+  const createSpecimen = specimens.find((item) => item.id === createSpecimenId)
   const refresh = () => load({ page: pagination.page, pageSize: pagination.pageSize, search, state })
   useEffect(() => { void refresh() }, [pagination.page, pagination.pageSize, state])
   useEffect(() => {
@@ -37,6 +39,9 @@ export function TransfersPage() {
       setContainers(storageResult.items.filter((item) => item.active && item.status === 'available' && item.occupied < item.capacity))
     })
   }, [])
+
+  const specimenSuspended = (specimen?: Specimen) =>
+    Boolean(specimen?.incidentItems?.some((item) => item.incident?.state === 'open'))
   const create = async () => {
     const values = await createForm.validateFields()
     setSaving(true)
@@ -60,13 +65,15 @@ export function TransfersPage() {
     : 'intake'
   const columns: ColumnsType<CustodyTransfer> = [
     { title: '交接单号', dataIndex: 'transferNo', fixed: 'left' },
-    { title: '样本', render: (_, row) => <div><strong>{row.specimen?.accessionNo || row.specimenId}</strong><small className="cell-subtitle">{row.specimen?.sampleType}</small></div> },
+    { title: '样本', render: (_, row) => <div><strong>{row.specimen?.accessionNo || row.specimenId}</strong><small className="cell-subtitle">{row.specimen?.sampleType}</small>{specimenSuspended(row.specimen) && <Tag icon={<WarningOutlined />} color="error">异常暂缓</Tag>}</div> },
     { title: '状态', dataIndex: 'state', render: (value) => <CustodyBadge state={value} /> },
     { title: '交接人', render: (_, row) => `${row.fromCustodian} → ${row.toCustodian}` },
     { title: '位置变化', render: (_, row) => <div>{row.fromLocation}<small className="cell-subtitle">→ {row.toLocation}</small></div> },
     { title: '温度', dataIndex: 'temperatureC', render: (value) => value == null ? '-' : `${value} °C` },
     { title: '发起人/时间', render: (_, row) => <div>{row.preparedByName}<small className="cell-subtitle">{formatDateTime(row.preparedAt)}</small></div> },
-    { title: '操作', fixed: 'right', render: (_, row) => <Space><Button size="small" icon={<HistoryOutlined />} onClick={() => void showTimeline(row)}>链路</Button>{row.state === 'prepared' && can('transfer:resolve') && <Button size="small" type="primary" icon={<CheckOutlined />} onClick={() => { setResolveTarget(row); setResolution('accepted') }}>处理</Button>}</Space> },
+    { title: '操作', fixed: 'right', render: (_, row) => <Space><Button size="small" icon={<HistoryOutlined />} onClick={() => void showTimeline(row)}>链路</Button>{row.state === 'prepared' && can('transfer:resolve') && (specimenSuspended(row.specimen)
+      ? <Button size="small" danger disabled icon={<WarningOutlined />}>异常暂缓</Button>
+      : <Button size="small" type="primary" icon={<CheckOutlined />} onClick={() => { setResolveTarget(row); setResolution('accepted') }}>处理</Button>)}</Space> },
   ]
   return (
     <div className="page-stack">
@@ -78,7 +85,8 @@ export function TransfersPage() {
           if (!('specimenId' in changed)) return
           const specimen = specimens.find((item) => item.id === changed.specimenId)
           if (specimen) createForm.setFieldsValue({ fromCustodian: specimen.currentCustodian, fromLocation: specimenLocation(specimen) })
-        }}><Row gutter={16}><Col span={12}><Form.Item name="transferNo" label="交接单号" rules={[{ required: true, min: 3 }]}><Input placeholder="TR-20260822-001" /></Form.Item></Col><Col span={12}><Form.Item name="specimenId" label="样本" rules={[{ required: true }]}><Select showSearch optionFilterProp="label" options={specimens.map((item) => ({ value: item.id, label: `${item.accessionNo} · ${item.sampleType}` }))} /></Form.Item></Col></Row><Row gutter={16}><Col span={12}><Form.Item name="fromCustodian" label="移交人" rules={[{ required: true }]}><Input /></Form.Item></Col><Col span={12}><Form.Item name="toCustodian" label="接收人" rules={[{ required: true }]}><Input /></Form.Item></Col></Row><Row gutter={16}><Col span={12}><Form.Item name="fromLocation" label="移交前位置" rules={[{ required: true }]}><Input /></Form.Item></Col><Col span={12}><Form.Item name="toLocation" label="目标位置描述" rules={[{ required: true }]}><Input /></Form.Item></Col></Row><Form.Item name="temperatureC" label="交接温度 (°C)"><InputNumber min={-200} max={30} precision={1} style={{ width: '100%' }} /></Form.Item><Form.Item name="reason" label="交接用途/备注"><Input.TextArea rows={3} maxLength={800} showCount /></Form.Item></Form>
+        }}><Alert style={{ marginBottom: 12 }} type={createSpecimen && specimenSuspended(createSpecimen) ? 'error' : 'info'} showIcon
+          message={createSpecimen && specimenSuspended(createSpecimen) ? '该样本处于温度异常处置期间，交接将被系统拦截，需待处置单结案' : '处于温度异常处置期间的样本不能发起交接，下拉中已置灰'} /><Row gutter={16}><Col span={12}><Form.Item name="transferNo" label="交接单号" rules={[{ required: true, min: 3 }]}><Input placeholder="TR-20260822-001" /></Form.Item></Col><Col span={12}><Form.Item name="specimenId" label="样本" rules={[{ required: true }]}><Select showSearch optionFilterProp="label" options={specimens.map((item) => ({ value: item.id, label: `${item.accessionNo} · ${item.sampleType}${specimenSuspended(item) ? '（异常暂缓）' : ''}`, disabled: specimenSuspended(item) }))} /></Form.Item></Col></Row><Row gutter={16}><Col span={12}><Form.Item name="fromCustodian" label="移交人" rules={[{ required: true }]}><Input /></Form.Item></Col><Col span={12}><Form.Item name="toCustodian" label="接收人" rules={[{ required: true }]}><Input /></Form.Item></Col></Row><Row gutter={16}><Col span={12}><Form.Item name="fromLocation" label="移交前位置" rules={[{ required: true }]}><Input /></Form.Item></Col><Col span={12}><Form.Item name="toLocation" label="目标位置描述" rules={[{ required: true }]}><Input /></Form.Item></Col></Row><Form.Item name="temperatureC" label="交接温度 (°C)"><InputNumber min={-200} max={30} precision={1} style={{ width: '100%' }} /></Form.Item><Form.Item name="reason" label="交接用途/备注"><Input.TextArea rows={3} maxLength={800} showCount /></Form.Item></Form>
       </Modal>
       <Modal title={`处理交接 ${resolveTarget?.transferNo || ''}`} width={620} open={Boolean(resolveTarget)} confirmLoading={saving} onOk={() => void resolve()} onCancel={() => setResolveTarget(null)} okText="确认处理" cancelText="返回">
         <Space direction="vertical" size="large" style={{ width: '100%' }}><Segmented block value={resolution} onChange={(value) => setResolution(value as Resolution)} options={[{ value: 'accepted', label: '接收', icon: <CheckOutlined /> }, { value: 'rejected', label: '拒绝', icon: <CloseOutlined /> }, { value: 'cancelled', label: '取消', icon: <StopOutlined /> }]} /><Form form={resolveForm} layout="vertical">{resolution === 'accepted' && <Row gutter={16}><Col span={12}><Form.Item name="toContainerId" label="目标冻存容器" rules={[{ required: true }]}><Select showSearch optionFilterProp="label" options={containers.map((item) => ({ value: item.id, label: `${item.code} · ${item.name}` }))} /></Form.Item></Col><Col span={12}><Form.Item name="toPosition" label="格位" rules={[{ required: true }]}><Input placeholder="R03-B05-C07" /></Form.Item></Col></Row>}<Form.Item name="temperatureC" label="交接复核温度 (°C)"><InputNumber min={-200} max={30} precision={1} style={{ width: '100%' }} /></Form.Item><Form.Item name="reason" label="处理说明" rules={[{ required: true, min: 3 }]}><Input.TextArea rows={3} /></Form.Item></Form></Space>

@@ -25,13 +25,15 @@ func Build(db *gorm.DB, redisClient *redis.Client, objectStore *minio.Client, cf
 	specimenRepo := repository.NewSpecimenRepository(db)
 	transferRepo := repository.NewTransferRepository(db)
 	protocolRepo := repository.NewProtocolRepository(db)
+	incidentRepo := repository.NewIncidentRepository(db)
 
 	auditService := service.NewAuditService(auditRepo)
 	authService := service.NewAuthService(userRepo, cfg.JWTSecret, cfg.TokenTTL)
 	storageService := service.NewStorageService(storageRepo, auditService)
 	specimenService := service.NewSpecimenService(specimenRepo, auditService)
-	transferService := service.NewTransferService(transferRepo, specimenRepo, auditService)
-	protocolService := service.NewProtocolService(protocolRepo, specimenRepo, transferRepo, auditService, objectStore, cfg.MinIOBucket)
+	transferService := service.NewTransferService(transferRepo, specimenRepo, incidentRepo, auditService)
+	protocolService := service.NewProtocolService(protocolRepo, specimenRepo, transferRepo, incidentRepo, auditService, objectStore, cfg.MinIOBucket)
+	incidentService := service.NewIncidentService(incidentRepo, storageRepo, auditService)
 
 	if err := authService.Seed(context.Background()); err != nil {
 		return nil, err
@@ -42,6 +44,7 @@ func Build(db *gorm.DB, redisClient *redis.Client, objectStore *minio.Client, cf
 	specimenHandler := handler.NewSpecimenHandler(specimenService)
 	transferHandler := handler.NewTransferHandler(transferService)
 	protocolHandler := handler.NewProtocolHandler(protocolService)
+	incidentHandler := handler.NewIncidentHandler(incidentService)
 	auditHandler := handler.NewAuditHandler(auditService)
 
 	engine := gin.New()
@@ -74,6 +77,12 @@ func Build(db *gorm.DB, redisClient *redis.Client, objectStore *minio.Client, cf
 	secured.GET("/custody-transfers/:id", transferHandler.Get)
 	secured.POST("/custody-transfers", middleware.RequirePermission("transfer:prepare"), transferHandler.Create)
 	secured.POST("/custody-transfers/:id/resolve", middleware.RequirePermission("transfer:resolve"), transferHandler.Resolve)
+
+	secured.GET("/temperature-incidents", incidentHandler.List)
+	secured.GET("/temperature-incidents/:id", incidentHandler.Get)
+	secured.POST("/temperature-incidents", middleware.RequirePermission("incident:manage"), incidentHandler.Create)
+	secured.POST("/temperature-incidents/:id/relocate", middleware.RequirePermission("incident:manage"), incidentHandler.Relocate)
+	secured.POST("/temperature-incidents/:id/resolve", middleware.RequirePermission("incident:manage"), incidentHandler.Resolve)
 
 	secured.GET("/protocol-reviews", protocolHandler.List)
 	secured.GET("/protocol-reviews/:id", protocolHandler.Get)

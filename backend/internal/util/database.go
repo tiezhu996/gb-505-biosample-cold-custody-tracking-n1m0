@@ -87,6 +87,8 @@ func Migrate(db *gorm.DB) error {
 		&model.Specimen{},
 		&model.CustodyTransfer{},
 		&model.ProtocolReview{},
+		&model.TemperatureIncident{},
+		&model.TemperatureIncidentItem{},
 		&model.AuditLog{},
 	); err != nil {
 		return err
@@ -304,6 +306,47 @@ func SeedDemoData(ctx context.Context, db *gorm.DB) error {
 		}
 		if err := tx.Create(&reviews).Error; err != nil {
 			return fmt.Errorf("seed protocol reviews: %w", err)
+		}
+
+		alarmStart := now.Add(-26 * time.Hour)
+		alarmEnd := now.Add(-22 * time.Hour)
+		alarmTemp := -58.6
+		recoveredTemp := -78.9
+		recoveredBy := uint(1)
+		incident := model.TemperatureIncident{
+			IncidentNo:      fmt.Sprintf("TI-%s-001", alarmStart.Format("20060102")),
+			ContainerID:     containers[1].ID,
+			State:           constants.IncidentStateResolved,
+			StartTempC:      alarmTemp,
+			EndTempC:        &recoveredTemp,
+			AlarmReason:     "柜门密封条老化导致库温回升，已更换密封条并复核温度",
+			Conclusion:      "库温恢复至 -80°C 温区，两支样本外观与温度记录复核正常，继续冻存",
+			HandlerID:       1,
+			HandlerName:     "系统初始化",
+			RecoveredByID:   &recoveredBy,
+			RecoveredByName: "系统初始化",
+			StartedAt:       alarmStart,
+			ResolvedAt:      &alarmEnd,
+		}
+		if err := tx.Create(&incident).Error; err != nil {
+			return fmt.Errorf("seed temperature incident: %w", err)
+		}
+		incidentItems := []model.TemperatureIncidentItem{
+			{
+				IncidentID:          incident.ID,
+				SpecimenID:          specimens[0].ID,
+				SnapshotContainerID: containers[1].ID,
+				SnapshotPosition:    specimens[0].Position,
+			},
+			{
+				IncidentID:          incident.ID,
+				SpecimenID:          specimens[1].ID,
+				SnapshotContainerID: containers[1].ID,
+				SnapshotPosition:    specimens[1].Position,
+			},
+		}
+		if err := tx.Create(&incidentItems).Error; err != nil {
+			return fmt.Errorf("seed temperature incident items: %w", err)
 		}
 		return nil
 	})

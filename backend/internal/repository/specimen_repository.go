@@ -62,7 +62,8 @@ func (r *specimenRepository) List(ctx context.Context, filter SpecimenFilter) ([
 		return tx.Order("prepared_at DESC").Limit(10)
 	}).Preload("ProtocolReviews", func(tx *gorm.DB) *gorm.DB {
 		return tx.Order("reviewed_at DESC").Limit(10)
-	}).Order("received_at DESC, id DESC").Offset((query.Page - 1) * query.PageSize).Limit(query.PageSize).Find(&items).Error
+	}).Preload("IncidentItems.Incident").Preload("IncidentItems.Incident.Container").
+		Order("received_at DESC, id DESC").Offset((query.Page - 1) * query.PageSize).Limit(query.PageSize).Find(&items).Error
 	return items, total, err
 }
 
@@ -73,6 +74,8 @@ func (r *specimenRepository) Find(ctx context.Context, id uint) (*model.Specimen
 		Preload("Transfers", func(tx *gorm.DB) *gorm.DB { return tx.Order("prepared_at DESC") }).
 		Preload("Transfers.ToContainer").
 		Preload("ProtocolReviews", func(tx *gorm.DB) *gorm.DB { return tx.Order("reviewed_at DESC") }).
+		Preload("IncidentItems").Preload("IncidentItems.Incident").Preload("IncidentItems.Incident.Container").
+		Preload("IncidentItems.TargetContainer").
 		First(&item, id).Error
 	return &item, err
 }
